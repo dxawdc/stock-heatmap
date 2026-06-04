@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A股热力树图</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      padding: 11px 20px;
+      border-bottom: 1px solid #21262d;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; color: #f0f6fc; flex: 1; min-width: 140px; }
+
+    .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .ctrl-group { display: flex; align-items: center; gap: 5px; }
+    label { font-size: 0.8rem; color: #8b949e; white-space: nowrap; }
+
+    select {
+      background: #161b22; border: 1px solid #30363d;
+      color: #e6edf3; padding: 4px 8px; border-radius: 5px;
+      font-size: 0.8rem; cursor: pointer; outline: none;
+    }
+    select:focus { border-color: #388bfd; }
+
+    .toggle-group { display: flex; border: 1px solid #30363d; border-radius: 5px; overflow: hidden; }
+    .toggle-btn {
+      background: #161b22; color: #8b949e; border: none;
+      padding: 4px 12px; font-size: 0.8rem; cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .toggle-btn + .toggle-btn { border-left: 1px solid #30363d; }
+    .toggle-btn.active { background: #1f6feb; color: #fff; }
+    .toggle-btn:hover:not(.active) { background: #21262d; color: #e6edf3; }
+
+    #btn-generate {
+      background: #1f6feb; color: #fff; border: none;
+      padding: 6px 18px; border-radius: 5px;
+      font-size: 0.85rem; font-weight: 500; cursor: pointer;
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    #btn-generate:hover    { background: #388bfd; }
+    #btn-generate:active   { transform: scale(.97); }
+    #btn-generate:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    #sector-bar {
+      padding: 4px 20px; font-size: 0.74rem;
+      background: #161b22; border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+    }
+    .s-badge { padding: 1px 7px; border-radius: 9px; font-size: 0.7rem; font-weight: 600; flex-shrink: 0; }
+    .s-loading { background: #4d2c00; color: #f0883e; }
+    .s-ready   { background: #0d3320; color: #3fb950; }
+    #sector-prog { color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #status-bar {
+      padding: 5px 20px; font-size: 0.76rem; color: #8b949e;
+      border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0; min-height: 28px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: #484f58; flex-shrink: 0; }
+    .dot.loading { background: #f0883e; animation: pulse 1s infinite; }
+    .dot.ok      { background: #3fb950; }
+    .dot.err     { background: #f85149; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    #chart-wrap { flex: 1; position: relative; min-height: 0; }
+
+    #chart { width: 100%; height: 100%; }
+
+    #empty {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; color: #484f58; pointer-events: none;
+    }
+    #empty svg { opacity: .3; }
+    #empty p { font-size: .9rem; }
+    #empty.hidden { display: none; }
+
+    #loading-overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(13,17,23,.75); z-index: 10;
+      align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+    }
+    #loading-overlay.active { display: flex; }
+    .spinner {
+      width: 42px; height: 42px;
+      border: 4px solid #21262d; border-top-color: #1f6feb;
+      border-radius: 50%; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-overlay p { font-size: .88rem; color: #8b949e; }
+
+    .legend-bar {
+      padding: 4px 20px 6px; font-size: 0.7rem; color: #484f58;
+      display: flex; align-items: center; gap: 14px;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .leg { display: flex; align-items: center; gap: 4px; }
+    .sw { width: 10px; height: 10px; border-radius: 2px; }
+    .sw.up { background: #d73027; }
+    .sw.fl { background: #aaa; }
+    .sw.dn { background: #1a9850; }
+    .leg-grad { width: 80px; height: 8px; border-radius: 2px; background: linear-gradient(to right, #1a9850, #f7f7f7, #d73027); }
+    .leg-mid  { margin-left: 6px; }
+    .leg-right { margin-left: auto; }
+
+    .divider { width: 1px; height: 22px; background: #30363d; flex-shrink: 0; }
+
+    .btn-export {
+      display: flex; align-items: center; gap: 5px;
+      background: #161b22; color: #8b949e;
+      border: 1px solid #30363d;
+      padding: 4px 12px; border-radius: 5px;
+      font-size: 0.8rem; cursor: pointer;
+      transition: background .12s, color .12s, border-color .12s;
+      white-space: nowrap;
+    }
+    .btn-export:hover:not(:disabled) { background: #21262d; color: #e6edf3; border-color: #8b949e; }
+    .btn-export:disabled { opacity: .35; cursor: not-allowed; }
+    .btn-export.exporting { color: #f0883e; border-color: #f0883e; }
+    .btn-export.done      { color: #3fb950; border-color: #3fb950; }
+
+    .btn-force {
+      background: none; color: #484f58; border: 1px solid #21262d;
+      padding: 4px 10px; border-radius: 5px; font-size: 0.78rem;
+      cursor: pointer; transition: color .12s, border-color .12s;
+    }
+    .btn-force:hover { color: #e6edf3; border-color: #484f58; }
+
+    #cache-bar {
+      padding: 3px 20px; font-size: 0.72rem;
+      border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+    }
+    #cache-bar.hidden { display: none; }
+    .c-badge { padding: 1px 7px; border-radius: 9px; font-size: 0.68rem; font-weight: 600; flex-shrink: 0; }
+    .c-fresh  { background: #0d3320; color: #3fb950; }
+    .c-memory { background: #1b2a3f; color: #388bfd; }
+    .c-disk   { background: #2d1f00; color: #e3b341; }
+    #cache-info { color: #484f58; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📈 A股市场热力树图</h1>
+  <div class="controls">
+    <div class="ctrl-group">
+      <label for="top-n">数量</label>
+      <select id="top-n">
+        <option value="200">前 200 只</option>
+        <option value="500" selected>前 500 只</option>
+        <option value="1000">前 1000 只</option>
+        <option value="2000">前 2000 只</option>
+        <option value="0">全部（~5500 只）</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <label>色块大小</label>
+      <div class="toggle-group" id="size-toggle">
+        <button type="button" class="toggle-btn" data-val="mktcap">总市值</button>
+        <button type="button" class="toggle-btn" data-val="float_cap">流通市值</button>
+        <button type="button" class="toggle-btn active" data-val="vol">成交额</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>分组</label>
+      <div class="toggle-group" id="grp-toggle">
+        <button type="button" class="toggle-btn active" data-val="sector">按板块</button>
+        <button type="button" class="toggle-btn" data-val="none">平铺</button>
+      </div>
+    </div>
+    <button id="btn-generate" type="button">一键生成</button>
+    <button id="btn-force" type="button" class="btn-force" title="忽略缓存，强制重新拉取数据">↺ 强制刷新</button>
+
+    <div class="divider"></div>
+
+    <div class="ctrl-group">
+      <select id="export-fmt" title="导出格式与分辨率">
+        <option value="png|3">PNG 3× 高清</option>
+        <option value="png|5" selected>PNG 5× 超清</option>
+        <option value="png|8">PNG 8× 印刷级</option>
+        <option value="svg|1">SVG 矢量</option>
+        <option value="jpeg|4">JPEG 4× 压缩</option>
+      </select>
+      <button id="btn-export" type="button" class="btn-export" disabled title="图表生成后可导出">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        导出图片
+      </button>
+    </div>
+  </div>
+</header>
+
+<div id="sector-bar">
+  <span class="s-badge s-loading" id="s-badge">行业加载中</span>
+  <span id="sector-prog">正在后台初始化申万行业映射...</span>
+</div>
+
+<div id="cache-bar" class="hidden">
+  <span class="c-badge" id="cache-badge"></span>
+  <span id="cache-info"></span>
+</div>
+
+<div id="status-bar">
+  <span class="dot" id="dot"></span>
+  <span id="status-txt">点击「一键生成」获取实时数据并绘图</span>
+</div>
+
+<div id="chart-wrap">
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="loading-txt">正在拉取实时行情数据...</p>
+  </div>
+  <div id="empty">
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1">
+      <rect x="3" y="3" width="7" height="9" rx="1"/>
+      <rect x="14" y="3" width="7" height="5" rx="1"/>
+      <rect x="14" y="12" width="7" height="9" rx="1"/>
+      <rect x="3" y="16" width="7" height="5" rx="1"/>
+    </svg>
+    <p>暂无数据 — 点击上方按钮生成图表</p>
+  </div>
+  <div id="chart"></div>
+</div>
+
+<div class="legend-bar">
+  <span class="leg"><span class="sw dn"></span>跌</span>
+  <span class="leg-grad"></span>
+  <span class="leg"><span class="sw up"></span>涨</span>
+  <span class="leg leg-mid" id="legend-size-tip">色块大小 = 成交额 &nbsp;·&nbsp; 颜色 = 涨跌幅（板块/全市场为加权均值）</span>
+  <span class="leg-right">数据：腾讯财经 · 大盘指数(新浪) · 申万行业（AKShare）</span>
+</div>
+
+<script>
+// ── 格式化辅助 ────────────────────────────────────────────────────
+function fmtPct(g) {
+  if (g == null) return '—';
+  const p = g * 100;
+  return (p >= 0 ? '+' : '') + p.toFixed(2) + '%';
+}
+function fmtVol(v) {
+  return v >= 10000 ? (v / 10000).toFixed(2) + ' 亿' : v.toFixed(0) + ' 万';
+}
+
+// ── 将紧凑嵌套 JSON → Plotly go.Treemap 所需的扁平数组 ─────────────
+function toPlotly(apiData) {
+  const ids = [], labels = [], parents = [], values = [], colors = [], texts = [], hovers = [];
+  const sLabel = apiData.size_label || '成交额';
+  const sUnit  = apiData.size_unit  || '万元';
+
+  function fmtSize(v) {
+    // 智能单位：亿/万
+    if (sUnit === '亿元') return v >= 10000 ? (v / 10000).toFixed(0) + ' 万亿' : v.toFixed(0) + ' 亿';
+    return v >= 10000 ? (v / 10000).toFixed(2) + ' 亿' : v.toFixed(0) + ' 万';
+  }
+
+  function chgColor(g) {
+    return g > 0.001 ? '#ff4d4f' : g < -0.001 ? '#52c41a' : '#aaa';
+  }
+
+  function extraMetrics(n) {
+    // 额外显示三项指标（只要数据存在）
+    const lines = [];
+    if (n.vol   != null && n.vol   > 0) lines.push(`成交额: ${fmtVol(n.vol)} 万`);
+    if (n.mktcap != null && n.mktcap > 0) lines.push(`总市值: ${n.mktcap >= 10000 ? (n.mktcap/10000).toFixed(0)+'万亿' : n.mktcap.toFixed(0)+'亿'}`);
+    if (n.float_cap != null && n.float_cap > 0 && Math.abs(n.float_cap - n.mktcap) > 0.1)
+      lines.push(`流通市值: ${n.float_cap >= 10000 ? (n.float_cap/10000).toFixed(0)+'万亿' : n.float_cap.toFixed(0)+'亿'}`);
+    return lines.join('<br>');
+  }
+
+  function walk(n, pid) {
+    const myId = (pid === '' ? '__root__' : (n.children ? `__s__${n.n}` : n.c));
+
+    ids.push(myId);
+    labels.push(n.n);
+    parents.push(pid);
+    values.push(n.v);
+    colors.push(n.g || 0);
+    texts.push(`${n.n}<br>${fmtPct(n.g)}`);
+
+    if (pid === '') {
+      const g = n.g, src = n.src || '';
+      hovers.push(
+        `<b>全市场（A股）</b><br>`+
+        `涨跌幅: <span style="color:${chgColor(g)};font-weight:bold">${fmtPct(g)}</span>`+
+        `<span style="color:#666;font-size:11px"> ${src}</span><br>`+
+        `${sLabel}: ${fmtSize(n.v)} ${sUnit}<br>`+
+        `${extraMetrics(n)}<br>全市场股票数: ${n.cnt}`
+      );
+    } else if (n.cnt != null) {
+      const g = n.g, src = n.src || '';
+      hovers.push(
+        `<b>${n.n}</b><br>`+
+        `涨跌幅: <span style="color:${chgColor(g)};font-weight:bold">${fmtPct(g)}</span>`+
+        `<span style="color:#666;font-size:11px"> ${src}</span><br>`+
+        `${sLabel}: ${fmtSize(n.v)} ${sUnit}<br>`+
+        `${extraMetrics(n)}<br>股票数: ${n.cnt}`
+      );
+    } else {
+      const g = n.g;
+      hovers.push(
+        `<b>${n.n}</b>（${n.c}）<br>`+
+        `涨跌幅: <span style="color:${chgColor(g)};font-weight:bold">${fmtPct(g)}</span><br>`+
+        `${sLabel}: ${fmtSize(n.v)} ${sUnit}<br>`+
+        `${extraMetrics(n)}`
+      );
+    }
+
+    if (n.children) n.children.forEach(c => walk(c, myId));
+  }
+
+  walk(apiData.root, '');
+
+  const trace = {
+    type: 'treemap',
+    ids, labels, parents, values,
+    branchvalues: 'total',
+    marker: {
+      colors,
+      // 中国股市惯例：跌绿涨红
+      colorscale: [[0, '#1a9850'], [0.5, '#f7f7f7'], [1, '#d73027']],
+      cmid: 0,
+      cmin: -0.055,
+      cmax: 0.055,
+      colorbar: {
+        title: { text: '涨跌幅', font: { color: '#e6edf3', size: 12 } },
+        tickformat: '+.1%',
+        tickfont: { color: '#e6edf3', size: 11 },
+        len: 0.55,
+        thickness: 15,
+      },
+      pad: { t: 3, l: 3, r: 3, b: 3 },
+    },
+    text: texts,
+    textinfo: 'text',
+    customdata: hovers,
+    hovertemplate: '%{customdata}<extra></extra>',
+    textfont: { size: 12, family: 'Microsoft YaHei, SimHei, sans-serif' },
+    tiling: { packing: 'squarify', pad: 2 },
+  };
+
+  const layout = {
+    title: { text: apiData.title, font: { size: 14, color: '#e6edf3' } },
+    margin: { t: 52, l: 8, r: 8, b: 8 },
+    paper_bgcolor: '#0d1117',
+    plot_bgcolor:  '#0d1117',
+    font: { color: '#e6edf3', family: 'Microsoft YaHei, SimHei, sans-serif' },
+    autosize: true,
+  };
+
+  return { trace, layout };
+}
+
+// ── DOM 元素 ──────────────────────────────────────────────────────
+const dot        = document.getElementById('dot');
+const statusTxt  = document.getElementById('status-txt');
+const sBadge     = document.getElementById('s-badge');
+const sProg      = document.getElementById('sector-prog');
+const empty      = document.getElementById('empty');
+const overlay    = document.getElementById('loading-overlay');
+const loadingTxt = document.getElementById('loading-txt');
+const btn        = document.getElementById('btn-generate');
+const topNSel    = document.getElementById('top-n');
+const sizeToggle = document.getElementById('size-toggle');
+const grpToggle  = document.getElementById('grp-toggle');
+const btnExport  = document.getElementById('btn-export');
+const exportFmt  = document.getElementById('export-fmt');
+const btnForce   = document.getElementById('btn-force');
+const cacheBar   = document.getElementById('cache-bar');
+const cacheBadge = document.getElementById('cache-badge');
+const cacheInfo  = document.getElementById('cache-info');
+
+// 当前 sizeBy 状态
+let sizeBy = 'vol';
+const SIZE_INFO = {
+  vol:       { label: '成交额', unit: '万元' },
+  mktcap:    { label: '总市值', unit: '亿元' },
+  float_cap: { label: '流通市值', unit: '亿元' },
+};
+
+function setStatus(type, text) {
+  dot.className = 'dot ' + type;
+  statusTxt.textContent = text;
+}
+
+// ── 轮询行业映射状态 ─────────────────────────────────────────────
+async function pollSector() {
+  try {
+    const r = await fetch('/api/sector-status');
+    const d = await r.json();
+    sProg.textContent = d.progress || '初始化中...';
+    if (d.ready) {
+      sBadge.textContent = `申万行业已就绪（${d.count} 只）`;
+      sBadge.className = 's-badge s-ready';
+      return;
+    }
+  } catch (_) {}
+  setTimeout(pollSector, 3000);
+}
+pollSector();
+
+// ── 缓存状态展示 ─────────────────────────────────────────────────
+const CACHE_LABELS = {
+  fresh:  { cls: 'c-fresh',  text: '实时数据' },
+  memory: { cls: 'c-memory', text: '内存缓存' },
+  disk:   { cls: 'c-disk',   text: '磁盘缓存' },
+};
+
+function showCacheInfo(data) {
+  const ct    = data.cache_type || 'fresh';
+  const info  = CACHE_LABELS[ct] || CACHE_LABELS.fresh;
+  const genAt = data.generated_at || '';
+  const mStat = data.market_status || '';
+  const td    = data.trading_date  || '';
+
+  cacheBadge.className = `c-badge ${info.cls}`;
+  cacheBadge.textContent = info.text;
+
+  const parts = [];
+  if (genAt) parts.push(`数据时间：${genAt}`);
+  if (td)    parts.push(`交易日：${td}`);
+  if (mStat) parts.push(mStat === 'open' ? '📈 盘中' : '🔒 已闭市');
+  cacheInfo.textContent = parts.join('  ·  ');
+
+  cacheBar.classList.remove('hidden');
+}
+
+// ── 色块大小切换 ─────────────────────────────────────────────────
+sizeToggle.addEventListener('click', e => {
+  const b = e.target.closest('.toggle-btn');
+  if (!b) return;
+  sizeBy = b.dataset.val;
+  sizeToggle.querySelectorAll('.toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+});
+
+// ── 分组切换 ─────────────────────────────────────────────────────
+let groupBy = 'sector';
+grpToggle.addEventListener('click', e => {
+  const b = e.target.closest('.toggle-btn');
+  if (!b) return;
+  groupBy = b.dataset.val;
+  grpToggle.querySelectorAll('.toggle-btn').forEach(x => x.classList.toggle('active', x === b));
+});
+
+// ── 强制刷新 ─────────────────────────────────────────────────────
+let pendingForce = false;
+btnForce.addEventListener('click', () => {
+  pendingForce = true;
+  btn.click();
+});
+
+// ── 生成图表 ─────────────────────────────────────────────────────
+const config = {
+  responsive: true,
+  displaylogo: false,
+  modeBarButtonsToRemove: ['select2d', 'lasso2d'],
+  toImageButtonOptions: {
+    format: 'png',
+    filename: `A股热力树图_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}`,
+    scale: 2,
+  },
+};
+
+btn.addEventListener('click', async () => {
+  const topN    = topNSel.value;
+  const si      = SIZE_INFO[sizeBy] || SIZE_INFO.vol;
+  const scope   = topN === '0' ? '全部' : `${si.label}前 ${topN} 只`;
+  const mode    = groupBy === 'sector' ? '按板块' : '平铺';
+
+  btn.disabled = true;
+  overlay.classList.add('active');
+  loadingTxt.textContent = `正在拉取实时行情（${scope} · ${mode}）...`;
+  setStatus('loading', `加载中：${scope} · ${mode}（约 3～10 秒）`);
+
+  const tips = [
+    `正在从腾讯财经获取实时行情（${scope}）...`,
+    groupBy === 'sector' ? '正在按申万行业分组...' : '正在整理平铺视图...',
+    '正在匹配大盘指数和板块涨跌幅...',
+    '正在构建热力树图数据...',
+  ];
+  let ti = 0;
+  const tipTimer = setInterval(() => { loadingTxt.textContent = tips[ti++ % tips.length]; }, 4000);
+
+  try {
+    const t0  = Date.now();
+    const ctl = new AbortController();
+    const tid = setTimeout(() => ctl.abort(), 180_000);
+
+    const forceParam = pendingForce ? '&force=true' : '';
+    pendingForce = false;
+    const res  = await fetch(`/api/heatmap?top_n=${topN}&group_by=${groupBy}&size_by=${sizeBy}${forceParam}`, { signal: ctl.signal });
+    clearTimeout(tid); clearInterval(tipTimer);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    // 网络拿到紧凑 JSON 后，在 JS 里快速转成 Plotly 格式
+    const { trace, layout } = toPlotly(data);
+
+    empty.classList.add('hidden');
+    overlay.classList.remove('active');
+
+    Plotly.react('chart', [trace], layout, config);
+    btnExport.disabled = false;
+    showCacheInfo(data);
+
+    // 同步图例说明
+    const si2 = SIZE_INFO[sizeBy] || SIZE_INFO.vol;
+    document.getElementById('legend-size-tip').textContent =
+      `色块大小 = ${si2.label}（${si2.unit}） · 颜色 = 涨跌幅（板块/全市场来自官方指数）`;
+
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    setStatus('ok', `图表生成成功 ✓ — 耗时 ${elapsed}s | ${new Date().toLocaleString('zh-CN')}`);
+  } catch (err) {
+    clearInterval(tipTimer);
+    overlay.classList.remove('active');
+    const msg = err.name === 'AbortError' ? '请求超时（超过 3 分钟），请检查网络' : err.message;
+    setStatus('err', `错误：${msg}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+window.addEventListener('resize', () => Plotly.relayout('chart', { autosize: true }));
+
+// ── 导出高清图片 ──────────────────────────────────────────────────
+btnExport.addEventListener('click', async () => {
+  const [format, scaleStr] = exportFmt.value.split('|');
+  const scale  = parseInt(scaleStr, 10);
+  const date   = new Date().toLocaleDateString('zh-CN').replace(/\//g, '-');
+  const mode   = groupBy === 'sector' ? '按板块' : '平铺';
+  const topN   = topNSel.value === '0' ? '全部' : `前${topNSel.value}`;
+  const filename = `A股热力树图_${date}_${topN}_${mode}`;
+
+  const origText = btnExport.innerHTML;
+  btnExport.disabled = true;
+  btnExport.classList.add('exporting');
+  btnExport.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> 生成中...`;
+
+  try {
+    await Plotly.downloadImage('chart', { format, scale, filename });
+
+    btnExport.classList.remove('exporting');
+    btnExport.classList.add('done');
+    btnExport.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg> 已导出`;
+    setTimeout(() => {
+      btnExport.classList.remove('done');
+      btnExport.innerHTML = origText;
+      btnExport.disabled = false;
+    }, 2500);
+  } catch (err) {
+    btnExport.classList.remove('exporting');
+    btnExport.innerHTML = origText;
+    btnExport.disabled = false;
+    setStatus('err', `导出失败：${err.message}`);
+  }
+});
+</script>
+</body>
+</html>
