@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>A股热力树图</title>
+  <title>A股热力树图 · 作者@可以叫我才哥</title>
   <!-- 两个库均懒加载：PC默认Plotly，移动端默认ECharts，切换时按需拉取 -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,6 +20,7 @@
       flex-shrink: 0; flex-wrap: wrap;
     }
     header h1 { font-size: 1.05rem; font-weight: 600; color: #f0f6fc; flex: 1; min-width: 120px; }
+    header h1 .author { font-size: 0.72rem; font-weight: 400; color: #8b949e; margin-left: 8px; white-space: nowrap; }
 
     .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .ctrl-group { display: flex; align-items: center; gap: 4px; }
@@ -143,12 +144,61 @@
     .leg-grad { width: 72px; height: 7px; border-radius: 2px; background: linear-gradient(to right, #1a9850, #f7f7f7, #d73027); }
     .leg-mid  { margin-left: 4px; }
     .leg-right { margin-left: auto; }
+
+    /* 全屏按钮 */
+    .btn-fs {
+      background: none; color: #8b949e; border: 1px solid #30363d;
+      padding: 3px 8px; border-radius: 5px; font-size: 1rem; line-height: 1;
+      cursor: pointer; transition: color .12s, border-color .12s;
+    }
+    .btn-fs:hover { color: #e6edf3; border-color: #8b949e; }
+
+    /* 全屏模式：隐藏所有非图表区域 */
+    body.is-fs header,
+    body.is-fs #sector-bar,
+    body.is-fs #cache-bar,
+    body.is-fs #status-bar,
+    body.is-fs .legend-bar { display: none !important; }
+
+    body.is-fs { overflow: hidden; }
+
+    body.is-fs #chart-wrap {
+      position: fixed; inset: 0; z-index: 200;
+      height: 100dvh;   /* dvh 在移动端更准确（排除地址栏） */
+    }
+
+    /* 全屏下的悬浮操作栏 */
+    #fs-bar {
+      display: none;
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      z-index: 300; align-items: center; gap: 10px;
+      background: rgba(22, 27, 34, 0.92);
+      border: 1px solid #30363d; border-radius: 24px;
+      padding: 7px 18px;
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+    }
+    body.is-fs #fs-bar { display: flex; }
+
+    .fs-btn {
+      background: none; color: #e6edf3; border: none;
+      font-size: 0.85rem; cursor: pointer; padding: 4px 8px;
+      border-radius: 6px; white-space: nowrap;
+      transition: background .12s;
+    }
+    .fs-btn:hover { background: rgba(255,255,255,.1); }
+    .fs-btn.exit   { color: #f85149; }
+    .fs-sep { width: 1px; height: 18px; background: #30363d; flex-shrink: 0; }
+    #fs-bar select {
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 3px 6px; border-radius: 5px; font-size: 0.78rem; cursor: pointer; outline: none;
+    }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>📈 A股市场热力树图</h1>
+  <h1>📈 A股市场热力树图<span class="author">作者@可以叫我才哥</span></h1>
   <div class="controls">
     <div class="ctrl-group">
       <label for="top-n">数量</label>
@@ -183,7 +233,8 @@
       </div>
     </div>
     <button id="btn-generate" type="button">一键生成</button>
-    <button id="btn-force"    type="button" class="btn-force" title="忽略缓存，强制重新拉取">↺ 刷新</button>
+    <button id="btn-force"      type="button" class="btn-force" title="忽略缓存，强制重新拉取">↺ 刷新</button>
+    <button id="btn-fullscreen" type="button" class="btn-fs"    title="全屏查看图表">⛶</button>
 
     <div class="divider"></div>
 
@@ -219,6 +270,19 @@
 </div>
 
 <div id="chart-wrap">
+  <!-- 全屏模式悬浮操作栏 -->
+  <div id="fs-bar">
+    <button type="button" class="fs-btn exit" id="btn-exit-fs">✕ 退出全屏</button>
+    <span class="fs-sep"></span>
+    <select id="fs-export-fmt" title="导出格式">
+      <option value="png|3">PNG 3×</option>
+      <option value="png|5" selected>PNG 5×</option>
+      <option value="png|8">PNG 8×</option>
+      <option value="jpeg|4">JPEG 4×</option>
+    </select>
+    <button type="button" class="fs-btn" id="btn-fs-export">⬇ 导出</button>
+  </div>
+
   <div id="loading-overlay">
     <div class="spinner"></div>
     <p id="loading-txt">正在拉取实时行情数据...</p>
@@ -736,6 +800,55 @@ new ResizeObserver(() => {
   if (currentRenderer === 'plotly' && window.Plotly) Plotly.relayout('chart', { autosize: true });
   else if (echartsInst && !echartsInst.isDisposed()) echartsInst.resize();
 }).observe(document.getElementById('chart-wrap'));
+
+// ── 全屏模式 ────────────────────────────────────────────────────────
+function resizeChart() {
+  requestAnimationFrame(() => {
+    if (currentRenderer === 'plotly' && window.Plotly) Plotly.relayout('chart', { autosize: true });
+    else if (echartsInst && !echartsInst.isDisposed()) echartsInst.resize();
+  });
+}
+
+function enterFs() {
+  document.body.classList.add('is-fs');
+  resizeChart();
+}
+function exitFs() {
+  document.body.classList.remove('is-fs');
+  resizeChart();
+}
+
+document.getElementById('btn-fullscreen').addEventListener('click', enterFs);
+document.getElementById('btn-exit-fs').addEventListener('click', exitFs);
+
+// ESC 退出全屏
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('is-fs')) exitFs();
+});
+
+// 全屏悬浮栏导出
+document.getElementById('btn-fs-export').addEventListener('click', async () => {
+  const fsBtn = document.getElementById('btn-fs-export');
+  const [format, scaleStr] = document.getElementById('fs-export-fmt').value.split('|');
+  const scale    = parseInt(scaleStr, 10);
+  const date     = new Date().toLocaleDateString('zh-CN').replace(/\//g, '-');
+  const si       = SIZE_INFO[sizeBy] || SIZE_INFO.mktcap;
+  const mode     = groupBy === 'sector' ? '按板块' : '平铺';
+  const topN     = topNSel.value === '0' ? '全部' : `前${topNSel.value}`;
+  const renderer = currentRenderer === 'plotly' ? 'Plotly' : 'ECharts';
+  const filename = `A股热力树图_${date}_${topN}_${si.label}_${mode}_${renderer}.${format}`;
+
+  const orig = fsBtn.textContent;
+  fsBtn.textContent = '生成中...'; fsBtn.disabled = true;
+  try {
+    await exportChart(format, scale, filename);
+    fsBtn.textContent = '✓ 已导出';
+    setTimeout(() => { fsBtn.textContent = orig; fsBtn.disabled = false; }, 2000);
+  } catch (err) {
+    fsBtn.textContent = orig; fsBtn.disabled = false;
+    setStatus('err', `导出失败：${err.message}`);
+  }
+});
 </script>
 </body>
 </html>
