@@ -4,6 +4,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta, time as dt_time
 from pathlib import Path
 
@@ -17,18 +18,30 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="A股热力树图")
+# ── 基准路径（绝对路径，gunicorn / systemd 任意 WorkingDirectory 均正确）──
+BASE_DIR = Path(__file__).parent
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """替代废弃的 on_event('startup')"""
+    cleanup_old_cache(keep_days=5)
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _get_code_list)
+    loop.run_in_executor(None, _build_sector_map_sync)
+    yield   # 此后进入运行阶段，yield 之后为 shutdown
+
+app = FastAPI(title="A股热力树图", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 # ── 常量 ──────────────────────────────────────────────────────────
 TENCENT_URL = "https://qt.gtimg.cn/q={}"
 TENCENT_HDR = {"Referer": "https://finance.qq.com",
                "User-Agent": "Mozilla/5.0"}
 
-SECTOR_MAP_FILE  = Path("sector_map.json")
-CACHE_DIR        = Path("cache")
+SECTOR_MAP_FILE  = BASE_DIR / "sector_map.json"
+CACHE_DIR        = BASE_DIR / "cache"
 CACHE_DIR.mkdir(exist_ok=True)
 
 SECTOR_MAP_TTL   = 86400   # 24h
@@ -565,13 +578,6 @@ async def sector_status():
     })
 
 
-@app.on_event("startup")
-async def startup_event():
-    cleanup_old_cache(keep_days=5)
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(None, _get_code_list)
-    loop.run_in_executor(None, _build_sector_map_sync)
-
-
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+    # 仅用于本地开发调试，生产环境通过 gunicorn 启动
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
