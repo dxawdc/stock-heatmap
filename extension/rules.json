@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Referer", "operation": "set", "value": "https://www.sse.com.cn/" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||query.sse.com.cn",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Referer", "operation": "set", "value": "https://finance.qq.com/" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||qt.gtimg.cn",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": {
+      "type": "modifyHeaders",
+      "requestHeaders": [
+        { "header": "Referer", "operation": "set", "value": "https://www.szse.cn/" }
+      ]
+    },
+    "condition": {
+      "urlFilter": "||www.szse.cn",
+      "resourceTypes": ["xmlhttprequest"]
+    }
+  }
+]

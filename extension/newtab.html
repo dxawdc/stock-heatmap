@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A股热力树图 · 作者@可以叫我才哥</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117; color: #e6edf3;
+      font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
+      height: 100vh; display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    header {
+      padding: 10px 18px; border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 12px;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; color: #f0f6fc; flex: 1; min-width: 120px; }
+    header h1 .author { font-size: 0.72rem; font-weight: 400; color: #8b949e; margin-left: 8px; white-space: nowrap; }
+
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ctrl-group { display: flex; align-items: center; gap: 4px; }
+    label { font-size: 0.78rem; color: #8b949e; white-space: nowrap; }
+
+    select {
+      background: #161b22; border: 1px solid #30363d; color: #e6edf3;
+      padding: 4px 7px; border-radius: 5px; font-size: 0.78rem; cursor: pointer; outline: none;
+    }
+    select:focus { border-color: #388bfd; }
+
+    .toggle-group { display: flex; border: 1px solid #30363d; border-radius: 5px; overflow: hidden; }
+    .toggle-btn {
+      background: #161b22; color: #8b949e; border: none;
+      padding: 4px 10px; font-size: 0.78rem; cursor: pointer;
+      transition: background .12s, color .12s;
+    }
+    .toggle-btn + .toggle-btn { border-left: 1px solid #30363d; }
+    .toggle-btn.active { background: #1f6feb; color: #fff; }
+    .toggle-btn:hover:not(.active) { background: #21262d; color: #e6edf3; }
+
+    #btn-generate {
+      background: #1f6feb; color: #fff; border: none;
+      padding: 5px 16px; border-radius: 5px; font-size: 0.83rem;
+      font-weight: 500; cursor: pointer; transition: background .15s; white-space: nowrap;
+    }
+    #btn-generate:hover    { background: #388bfd; }
+    #btn-generate:active   { transform: scale(.97); }
+    #btn-generate:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+
+    .btn-force {
+      background: none; color: #484f58; border: 1px solid #21262d;
+      padding: 4px 8px; border-radius: 5px; font-size: 0.76rem;
+      cursor: pointer; transition: color .12s, border-color .12s;
+    }
+    .btn-force:hover { color: #e6edf3; border-color: #484f58; }
+
+    .divider { width: 1px; height: 20px; background: #30363d; flex-shrink: 0; }
+
+    .btn-export {
+      display: flex; align-items: center; gap: 5px;
+      background: #161b22; color: #8b949e; border: 1px solid #30363d;
+      padding: 4px 10px; border-radius: 5px; font-size: 0.78rem;
+      cursor: pointer; white-space: nowrap;
+      transition: background .12s, color .12s, border-color .12s;
+    }
+    .btn-export:hover:not(:disabled) { background: #21262d; color: #e6edf3; border-color: #8b949e; }
+    .btn-export:disabled  { opacity: .35; cursor: not-allowed; }
+    .btn-export.exporting { color: #f0883e; border-color: #f0883e; }
+    .btn-export.done      { color: #3fb950; border-color: #3fb950; }
+
+    #sector-bar {
+      padding: 3px 18px; font-size: 0.72rem; background: #161b22;
+      border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    }
+    .s-badge { padding: 1px 6px; border-radius: 8px; font-size: 0.68rem; font-weight: 600; flex-shrink: 0; }
+    .s-loading { background: #4d2c00; color: #f0883e; }
+    .s-ready   { background: #0d3320; color: #3fb950; }
+    #sector-prog { color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    #cache-bar { padding: 3px 18px; font-size: 0.7rem; border-bottom: 1px solid #21262d; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    #cache-bar.hidden { display: none; }
+    .c-badge { padding: 1px 6px; border-radius: 8px; font-size: 0.66rem; font-weight: 600; flex-shrink: 0; }
+    .c-fresh  { background: #0d3320; color: #3fb950; }
+    .c-memory { background: #1b2a3f; color: #388bfd; }
+    .c-local  { background: #2d1f00; color: #e3b341; }
+    #cache-info { color: #484f58; }
+
+    #status-bar {
+      padding: 4px 18px; font-size: 0.74rem; color: #8b949e;
+      border-bottom: 1px solid #21262d;
+      display: flex; align-items: center; gap: 8px; flex-shrink: 0; min-height: 26px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: #484f58; flex-shrink: 0; }
+    .dot.loading { background: #f0883e; animation: pulse 1s infinite; }
+    .dot.ok      { background: #3fb950; }
+    .dot.err     { background: #f85149; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+    #chart-wrap { flex: 1; position: relative; min-height: 0; }
+    #chart { width: 100%; height: 100%; }
+
+    #empty {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; color: #484f58; pointer-events: none;
+    }
+    #empty svg { opacity: .3; }
+    #empty p { font-size: .88rem; }
+    #empty.hidden { display: none; }
+
+    #loading-overlay {
+      display: none; position: absolute; inset: 0;
+      background: rgba(13,17,23,.8); z-index: 10;
+      align-items: center; justify-content: center; flex-direction: column; gap: 14px;
+    }
+    #loading-overlay.active { display: flex; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 4px solid #21262d; border-top-color: #1f6feb;
+      border-radius: 50%; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading-overlay p { font-size: .86rem; color: #8b949e; }
+
+    .legend-bar {
+      padding: 3px 18px 5px; font-size: 0.68rem; color: #484f58;
+      display: flex; align-items: center; gap: 12px;
+      flex-shrink: 0; flex-wrap: wrap;
+    }
+    .leg { display: flex; align-items: center; gap: 3px; }
+    .sw { width: 9px; height: 9px; border-radius: 2px; }
+    .sw.up { background: #d73027; }
+    .sw.fl { background: #aaa; }
+    .sw.dn { background: #1a9850; }
+    .leg-grad { width: 72px; height: 7px; border-radius: 2px; background: linear-gradient(to right, #1a9850, #f7f7f7, #d73027); }
+    .leg-mid  { margin-left: 4px; }
+    .leg-right { margin-left: auto; }
+
+    .btn-fs {
+      background: none; color: #8b949e; border: 1px solid #30363d;
+      padding: 3px 8px; border-radius: 5px; font-size: 1rem; line-height: 1;
+      cursor: pointer; transition: color .12s, border-color .12s;
+    }
+    .btn-fs:hover { color: #e6edf3; border-color: #8b949e; }
+
+    body.is-fs header,
+    body.is-fs #sector-bar,
+    body.is-fs #cache-bar,
+    body.is-fs #status-bar,
+    body.is-fs .legend-bar { display: none !important; }
+    body.is-fs { overflow: hidden; }
+    body.is-fs #chart-wrap {
+      position: fixed; inset: 0; z-index: 200;
+      height: 100dvh;
+    }
+
+    #fs-bar {
+      display: none;
+      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+      z-index: 300; align-items: center; gap: 10px;
+      background: rgba(22, 27, 34, 0.92);
+      border: 1px solid #30363d; border-radius: 24px;
+      padding: 7px 18px;
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
+    }
+    body.is-fs #fs-bar { display: flex; }
+
+    .fs-btn {
+      background: none; color: #e6edf3; border: none;
+      font-size: 0.85rem; cursor: pointer; padding: 4px 8px;
+      border-radius: 6px; white-space: nowrap;
+      transition: background .12s;
+    }
+    .fs-btn:hover { background: rgba(255,255,255,.1); }
+    .fs-btn.exit   { color: #f85149; }
+    .fs-sep { width: 1px; height: 18px; background: #30363d; flex-shrink: 0; }
+    #fs-bar select {
+      background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+      padding: 3px 6px; border-radius: 5px; font-size: 0.78rem; cursor: pointer; outline: none;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>📈 A股市场热力树图<span class="author">作者@可以叫我才哥</span></h1>
+  <div class="controls">
+    <div class="ctrl-group">
+      <label for="top-n">数量</label>
+      <select id="top-n">
+        <option value="200">前 200 只</option>
+        <option value="500" selected>前 500 只</option>
+        <option value="1000">前 1000 只</option>
+        <option value="2000">前 2000 只</option>
+        <option value="0">全部（~5500 只）</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <label>色块大小</label>
+      <div class="toggle-group" id="size-toggle">
+        <button type="button" class="toggle-btn active" data-val="mktcap">总市值</button>
+        <button type="button" class="toggle-btn" data-val="float_cap">流通市值</button>
+        <button type="button" class="toggle-btn" data-val="vol">成交额</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>分组</label>
+      <div class="toggle-group" id="grp-toggle">
+        <button type="button" class="toggle-btn active" data-val="sector">按板块</button>
+        <button type="button" class="toggle-btn" data-val="none">平铺</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>渲染</label>
+      <div class="toggle-group" id="renderer-toggle">
+        <button type="button" class="toggle-btn active" data-val="plotly">Plotly</button>
+        <button type="button" class="toggle-btn" data-val="echarts">ECharts</button>
+      </div>
+    </div>
+    <button id="btn-generate" type="button">一键生成</button>
+    <button id="btn-force"      type="button" class="btn-force" title="忽略缓存，强制重新拉取">↺ 刷新</button>
+    <button id="btn-fullscreen" type="button" class="btn-fs"    title="全屏查看图表">⛶</button>
+
+    <div class="divider"></div>
+
+    <div class="ctrl-group">
+      <select id="export-fmt" title="导出格式与分辨率">
+        <option value="png|3">PNG 3× 高清</option>
+        <option value="png|5" selected>PNG 5× 超清</option>
+        <option value="png|8">PNG 8× 印刷级</option>
+        <option value="jpeg|4">JPEG 4× 压缩</option>
+      </select>
+      <button id="btn-export" type="button" class="btn-export" disabled>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        导出
+      </button>
+    </div>
+  </div>
+</header>
+
+<div id="sector-bar">
+  <span class="s-badge s-loading" id="s-badge">行业加载中</span>
+  <span id="sector-prog">正在后台初始化申万行业映射...</span>
+</div>
+<div id="cache-bar" class="hidden">
+  <span class="c-badge" id="cache-badge"></span>
+  <span id="cache-info"></span>
+</div>
+<div id="status-bar">
+  <span class="dot" id="dot"></span>
+  <span id="status-txt">点击「一键生成」获取实时数据并绘图</span>
+</div>
+
+<div id="chart-wrap">
+  <div id="fs-bar">
+    <button type="button" class="fs-btn exit" id="btn-exit-fs">✕ 退出全屏</button>
+    <span class="fs-sep"></span>
+    <select id="fs-export-fmt" title="导出格式">
+      <option value="png|3">PNG 3×</option>
+      <option value="png|5" selected>PNG 5×</option>
+      <option value="png|8">PNG 8×</option>
+      <option value="jpeg|4">JPEG 4×</option>
+    </select>
+    <button type="button" class="fs-btn" id="btn-fs-export">⬇ 导出</button>
+  </div>
+
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <p id="loading-txt">正在拉取实时行情数据...</p>
+  </div>
+  <div id="empty">
+    <svg width="54" height="54" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1">
+      <rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/>
+      <rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>
+    </svg>
+    <p>暂无数据 — 点击上方按钮生成图表</p>
+  </div>
+  <div id="chart"></div>
+</div>
+
+<div class="legend-bar">
+  <span class="leg"><span class="sw dn"></span>跌</span>
+  <span class="leg-grad"></span>
+  <span class="leg"><span class="sw up"></span>涨</span>
+  <span class="leg leg-mid" id="legend-size-tip">色块大小 = 总市值 · 颜色 = 涨跌幅（板块/全市场来自官方指数）</span>
+  <span class="leg-right">数据：腾讯财经 · 申万行业</span>
+</div>
+
+<!-- 数据层 -->
+<script src="lib/xlsx.mini.min.js"></script>
+<script src="src/market.js"></script>
+<script src="src/data.js"></script>
+<script src="src/heatmap.js"></script>
+<script src="src/cache.js"></script>
+<!-- 渲染引擎（懒加载） -->
+<!-- UI 逻辑 -->
+<script src="newtab.js"></script>
+</body>
+</html>

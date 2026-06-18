@@ -1,0 +1,7 @@
+fastapi>=0.115.0
+uvicorn>=0.34.0
+gunicorn>=23.0.0
+akshare>=1.18.64
+plotly>=6.0.0
+pandas>=2.0.0
+requests>=2.31.0
