@@ -1,6 +1,18 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
+
+# 虚拟环境
 .env
 venv/
 .venv/
+
+# 部署凭据 / 脚本
+.deploy_cred
+deploy.py
+
+# 运行时缓存（按交易日生成，5 天自动清理，不应入库）
+cache/
+# 申万行业映射（24h TTL 的运行时缓存；首次启动自动重建）
+sector_map.json
