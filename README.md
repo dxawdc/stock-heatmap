@@ -10,7 +10,7 @@
 | 后端 | FastAPI + akshare | **无后端**，纯前端直连数据源 |
 | 使用方式 | 启动服务后浏览器访问 | 点工具栏图标，在新标签页打开 |
 | 数据缓存 | 内存 + 磁盘 JSON（按交易日） | 内存 + `chrome.storage.local` |
-| 交易日历 | ✅ akshare 交易日历（识别节假日） | 仅排除周末 |
+| 交易日历 | ✅ akshare 交易日历（识别节假日） | ✅ 新浪交易日历（识别节假日） |
 | 适用场景 | 团队/公网共享、定时缓存 | 个人本地使用，零部署、开箱即用 |
 
 > 作者：**@可以叫我才哥**
@@ -55,17 +55,17 @@
 | 维度 | 🌐 网页版 | 🧩 插件版 |
 |------|-----------|-----------|
 | 运行环境 | Python 服务（自建/服务器） | 浏览器扩展（本机） |
-| 行情数据源 | 腾讯行情 + 新浪指数 + akshare | 腾讯行情 + 三交易所官方接口 + 申万官网 |
+| 行情数据源 | 腾讯行情 + 新浪指数 + akshare | 腾讯行情 + 三交易所官方接口 + 申万官网 + 新浪交易日历 |
 | 代码列表来源 | akshare（封装好的接口） | 直连上交所/深交所/北交所官方接口 |
 | 跨域/防盗链 | 服务端请求，无限制 | `declarativeNetRequest` 改写 Referer |
 | 数据缓存 | 内存 + 磁盘 JSON（按交易日） | 内存 + `chrome.storage.local` |
 | 行业映射缓存 | 磁盘 24h | `chrome.storage.local` 24h |
-| **交易日历（节假日）** | ✅ akshare 交易日历 | ⛔ 仅排除周末 |
+| **交易日历（节假日）** | ✅ akshare 交易日历 | ✅ 新浪交易日历（前端解码） |
 | 强制刷新限流 | ✅ 同 IP 30s/次 | —（本地使用无需） |
 | 多用户/公网共享 | ✅ 适合 | ⛔ 仅本机 |
 | 部署成本 | 需 Python 环境 + 可选 Nginx | 零部署，加载即用 |
 
-> 唯一的能力差距是**节假日识别**：网页版借助 akshare 交易日历能准确判断法定节假日；插件版纯前端、无该数据源，目前仅排除周末（节假日当天仍会尝试拉取，但不影响数据正确性）。
+> 两版均能**识别法定节假日**：网页版借助 akshare 交易日历；插件版纯前端，直连新浪同源交易日历接口（`klc_td_sh.txt`），用内置解码器还原出当年完整交易日并缓存到 `chrome.storage.local`。若该接口拉取失败，插件会自动退回「仅排除周末」逻辑，不影响数据正确性。
 
 ---
 
@@ -196,15 +196,17 @@ Chrome / Edge 浏览器扩展（Manifest V3），**纯前端、零部署**。把
 ```
 点击工具栏图标 (background.js)
    └─ 新标签页打开 newtab.html
-        ├─ src/market.js   市场时间 / 交易日 / 代码归一化
-        ├─ src/data.js     6 个数据源直连拉取
+        ├─ src/market.js    市场时间 / 交易日判断 / 代码归一化
+        ├─ src/calendar.js  新浪交易日历（识别法定节假日）
+        │     └─ finance.sina.com.cn  klc_td_sh.txt（用 lib/sina-date-decode 解码）
+        ├─ src/data.js      5 个行情数据源直连拉取
         │     ├─ qt.gtimg.cn          腾讯批量行情（GBK 解码）
         │     ├─ query.sse.com.cn     上交所代码列表
         │     ├─ www.szse.cn          深交所代码列表（xlsx，用 xlsx.mini 解析）
         │     ├─ www.bse.cn           北交所代码列表（分页）
         │     └─ www.swsresearch.com  申万一级行业映射 + 实时涨跌
-        ├─ src/cache.js    两级缓存：内存 + chrome.storage.local
-        └─ src/heatmap.js  组装树图数据，newtab.js 用 Plotly/ECharts 渲染
+        ├─ src/cache.js     两级缓存：内存 + chrome.storage.local
+        └─ src/heatmap.js   组装树图数据，newtab.js 用 Plotly/ECharts 渲染
 ```
 
 **跨域与防盗链**：扩展通过 `host_permissions` 获得跨域 fetch 能力，并用 `declarativeNetRequest`（[`rules.json`](extension/rules.json)）改写对上交所/腾讯/深交所请求的 `Referer` 头，绕过防盗链限制——这是浏览器扩展能纯前端取数、而普通网页做不到的关键。
@@ -228,7 +230,7 @@ Chrome / Edge 浏览器扩展（Manifest V3），**纯前端、零部署**。把
 |------|------|
 | `storage` | 缓存热力图数据到 `chrome.storage.local` |
 | `declarativeNetRequest` | 改写请求 Referer 头以绕过数据源防盗链 |
-| `host_permissions` | 仅限上述 5 个数据源域名，**不访问任何其他网站** |
+| `host_permissions` | 仅限上述 6 个数据源域名（含新浪交易日历），**不访问任何其他网站** |
 
 > 插件不收集、不上传任何用户数据，所有请求直连公开行情接口。
 
@@ -251,8 +253,8 @@ stock-heatmap/
     ├── background.js      #   点击图标 → 开新标签页
     ├── newtab.html / .js  #   界面与渲染
     ├── rules.json         #   declarativeNetRequest Referer 改写规则
-    ├── lib/               #   Plotly / ECharts / xlsx
-    └── src/               #   market / data / cache / heatmap
+    ├── lib/               #   Plotly / ECharts / xlsx / 新浪日历解码器
+    └── src/               #   market / calendar / data / cache / heatmap
 ```
 
 ---
@@ -260,7 +262,7 @@ stock-heatmap/
 ## 📝 说明与已知限制
 
 - 数据来源为腾讯财经 / 新浪 / 各交易所 / 申万官网等公开接口，仅供学习研究，**不构成任何投资建议**。
-- 网页版交易日历依赖 akshare，获取失败会自动退回「仅排除周末」逻辑；插件版仅排除周末。
+- 两版均识别法定节假日：网页版用 akshare 交易日历，插件版用新浪交易日历（前端解码）；任一获取失败都会自动退回「仅排除周末」逻辑。
 - 网页版建议单 worker 部署（内存缓存不跨进程）。
 - 上游接口字段/防盗链策略可能变动，若拉取失败请检查数据源是否调整。
 

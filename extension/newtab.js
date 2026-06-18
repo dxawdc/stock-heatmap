@@ -363,6 +363,9 @@ DataLayer.onSectorProgress(d => {
 // 启动后台行业映射构建
 DataLayer.buildSectorMap();
 
+// 启动交易日历加载（识别法定节假日；失败自动退回「仅排除周末」）
+TradeCalendar.initTradeCalendar();
+
 // 初始化渲染器
 rendererToggle.querySelectorAll('.toggle-btn').forEach(b =>
   b.classList.toggle('active', b.dataset.val === currentRenderer)

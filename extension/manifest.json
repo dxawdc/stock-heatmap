@@ -9,7 +9,8 @@
     "https://query.sse.com.cn/*",
     "https://www.szse.cn/*",
     "https://www.bse.cn/*",
-    "https://www.swsresearch.com/*"
+    "https://www.swsresearch.com/*",
+    "https://finance.sina.com.cn/*"
   ],
   "background": {
     "service_worker": "background.js"

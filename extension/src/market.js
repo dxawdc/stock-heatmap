@@ -17,10 +17,22 @@ function cmpHM(a, b) {
   return a.m - b.m;
 }
 
-/** A股是否正在交易（仅排除周末，节假日不处理） */
+/**
+ * 某日是否为非交易日。
+ * 交易日历就绪时按新浪日历判断（含法定节假日）；
+ * 未就绪时退回「仅排除周末」。
+ */
+function isNonTradingDay(date) {
+  const trade = window.TradeCalendar ? window.TradeCalendar.isTradeDay(localDateStr(date)) : null;
+  if (trade !== null) return !trade;          // 日历就绪：节假日/周末均判为非交易日
+  const wd = date.getDay();                   // 日历未就绪：退回仅排除周末
+  return wd === 0 || wd === 6;
+}
+
+/** A股是否正在交易（交易日历就绪时识别节假日，否则仅排除周末） */
 function isMarketOpen() {
   const t = nowHM();
-  if (t.weekday >= 5) return false;
+  if (isNonTradingDay(t.date)) return false;
   const now = { h: t.h, m: t.m };
   return (cmpHM(MARKET.OPEN_AM, now) <= 0 && cmpHM(now, MARKET.CLOSE_AM) <= 0) ||
          (cmpHM(MARKET.OPEN_PM, now) <= 0 && cmpHM(now, MARKET.CLOSE_PM) <= 0);
@@ -45,30 +57,21 @@ function localDateStr(d) {
 
 /**
  * 当前所属 A股交易日 YYYY-MM-DD（本地时区）。
- * 盘后/周末 → 最近的交易日（周五或更早），节假日不处理。
+ * 开盘前（9:30 之前）回退一天，再向前找到最近交易日；
+ * 交易日历就绪时会跳过法定节假日，否则仅跳过周末。
  */
 function currentTradingDate() {
   const d = nowHM();
-  const today = d.date;
-  const wd = today.getDay();
+  const cur = new Date(d.date);
 
-  if (wd === 0) {
-    const r = new Date(today); r.setDate(r.getDate() - 2);
-    return localDateStr(r);
-  }
-  if (wd === 6) {
-    const r = new Date(today); r.setDate(r.getDate() - 1);
-    return localDateStr(r);
-  }
+  // 开盘前视作上一交易日
+  if (d.h < 9 || (d.h === 9 && d.m < 30)) cur.setDate(cur.getDate() - 1);
 
-  if (d.h < 9 || (d.h === 9 && d.m < 30)) {
-    const r = new Date(today);
-    r.setDate(r.getDate() - 1);
-    while (r.getDay() >= 5 || r.getDay() === 0) r.setDate(r.getDate() - 1);
-    return localDateStr(r);
-  }
+  // 向前找最近交易日（节假日/周末均跳过）
+  let guard = 0;
+  while (isNonTradingDay(cur) && guard++ < 30) cur.setDate(cur.getDate() - 1);
 
-  return localDateStr(today);
+  return localDateStr(cur);
 }
 
 /** sh600519 → 600519 */
