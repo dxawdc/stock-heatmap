@@ -210,10 +210,45 @@ async function fetchSwComponents(swCode) {
     .filter(c => /^\d{6}$/.test(c));
 }
 
+const SECTOR_MAP_STORAGE_KEY = "sector_map_cache";
+
+/** 从 chrome.storage.local 读行业映射（24h 内有效，否则返回 null） */
+function _loadSectorMapFromStorage() {
+  return new Promise(resolve => {
+    try {
+      chrome.storage.local.get(SECTOR_MAP_STORAGE_KEY, r => {
+        const e = r[SECTOR_MAP_STORAGE_KEY];
+        if (e && e.ts && (Date.now() / 1000 - e.ts) < SECTOR_MAP_TTL &&
+            e.map && Object.keys(e.map).length) {
+          resolve(e.map);
+        } else {
+          resolve(null);
+        }
+      });
+    } catch (_) { resolve(null); }
+  });
+}
+
+function _saveSectorMapToStorage(map) {
+  try {
+    chrome.storage.local.set({ [SECTOR_MAP_STORAGE_KEY]: { ts: Date.now() / 1000, map } });
+  } catch (_) {}
+}
+
 async function buildSectorMap() {
-  if (_sectorMapBuilding) return;
+  if (_sectorMapBuilding || _sectorMapReady) return;
   _sectorMapBuilding = true;
   try {
+    // 0. 优先读持久化缓存——避免每次打开标签页都重新拉取全部行业成分股
+    const cached = await _loadSectorMapFromStorage();
+    if (cached) {
+      _sectorMap = cached;
+      _sectorMapReady = true;
+      _sectorMapProgress = `已从本地缓存加载 ${Object.keys(cached).length} 只股票行业映射`;
+      _notifyProgress();
+      return;
+    }
+
     _sectorMapProgress = "正在获取申万一级行业列表...";
     _notifyProgress();
 
@@ -224,21 +259,28 @@ async function buildSectorMap() {
       return;
     }
 
+    // 各行业成分股并发拉取（限流 8，复刻 app.py 的 ThreadPoolExecutor(max_workers=8)）
     const mapping = {};
     let done = 0;
-    for (const ind of l1List) {
-      try {
-        const codes = await fetchSwComponents(ind.code);
-        for (const c of codes) mapping[c] = ind.name;
-      } catch (_) {}
-      done++;
-      _sectorMapProgress = `行业数据加载中 ${done}/${l1List.length}：${ind.name}`;
+    const CONCURRENCY = 8;
+    for (let i = 0; i < l1List.length; i += CONCURRENCY) {
+      const chunk = l1List.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(chunk.map(async ind => {
+        try { return { name: ind.name, codes: await fetchSwComponents(ind.code) }; }
+        catch (_) { return { name: ind.name, codes: [] }; }
+      }));
+      for (const { name, codes } of results) {
+        for (const c of codes) mapping[c] = name;
+        done++;
+        _sectorMapProgress = `行业数据加载中 ${done}/${l1List.length}：${name}`;
+      }
       _notifyProgress();
     }
 
     _sectorMap = mapping;
     _sectorMapReady = true;
     _sectorMapProgress = `申万行业映射完成，覆盖 ${Object.keys(mapping).length} 只股票`;
+    _saveSectorMapToStorage(mapping);
     _notifyProgress();
   } catch (e) {
     _sectorMapProgress = `行业映射构建失败: ${e.message || e}`;

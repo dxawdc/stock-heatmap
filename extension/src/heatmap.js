@@ -6,19 +6,27 @@ const SIZE_LABELS = {
   float_cap: ["流通市值", "亿元"],
 };
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 
-function _buildTitle(sizeLabel, sizeBy, topN, nShown, groupDesc) {
+/**
+ * 根据标题元信息 + 当前时间动态生成标题。
+ * 时间戳/盘中状态在每次渲染时实时拼接，避免缓存命中后标题显示过期信息。
+ */
+function renderTitle(meta) {
+  meta = meta || {};
+  const sizeLabel = meta.size_label || "成交额";
+  const topN      = meta.top_n != null ? meta.top_n : 0;
+  const nShown    = meta.n_shown != null ? meta.n_shown : 0;
+  const groupDesc = meta.group_desc || "";
+
   const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = localDateStr(now);
   const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
-  // 显示范围
   const scope = topN === 0
     ? `全部 ${nShown} 只`
     : `${sizeLabel}前 ${topN} 只（实际显示 ${nShown} 只）`;
 
-  // 市场状态
   const mstat = isMarketOpen() ? "盘中" : "闭市";
 
   return (
@@ -42,7 +50,6 @@ async function buildHeatmapData(topN, groupBy, sizeBy) {
 
   const { rows: df, totalCount: marketCount } = stockResult;
   const nStocks = df.length;
-  const scope = topN === 0 ? "全部" : `${sizeLabel}前 ${topN}`;
 
   // 根节点：大盘指数（备用等权均值）
   let rootChg = marketChgIndex;
@@ -78,12 +85,10 @@ async function buildHeatmapData(topN, groupBy, sizeBy) {
     const sectorStatus = DataLayer.getSectorStatus();
 
     if (sectorStatus.ready) {
-      groupDesc = `申万行业 · ${Object.keys(sectorMap).length} 只映射`;
       for (const row of df) {
         row._sector = sectorMap[row.code_clean] || getBoardFallback(row.code);
       }
     } else {
-      groupDesc = "交易所板块";
       for (const row of df) {
         row._sector = getBoardFallback(row.code);
       }
@@ -134,7 +139,10 @@ async function buildHeatmapData(topN, groupBy, sizeBy) {
     groupDesc = "平铺（不分组）";
   }
 
-  const title = _buildTitle(sizeLabel, sizeBy, topN, nStocks, groupDesc);
+  // 标题元信息：实时部分（时间/盘中状态）在渲染时由 renderTitle 动态拼接
+  const title_meta = {
+    size_label: sizeLabel, top_n: topN, n_shown: nStocks, group_desc: groupDesc,
+  };
 
   // 由 children 累加（保证 branchvalues:'total' 自洽）
   const totalV   = children.reduce((sum, c) => sum + c.v, 0);
@@ -143,10 +151,10 @@ async function buildHeatmapData(topN, groupBy, sizeBy) {
 
   const td = currentTradingDate();
   const now = new Date();
-  const generatedAt = `${now.toISOString().slice(0, 10)} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+  const generatedAt = `${localDateStr(now)} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
 
   return {
-    title,
+    title_meta,
     size_by: sizeBy,
     size_label: sizeLabel,
     size_unit: sizeUnit,
@@ -168,4 +176,4 @@ async function buildHeatmapData(topN, groupBy, sizeBy) {
   };
 }
 
-window.HeatmapBuilder = { buildHeatmapData };
+window.HeatmapBuilder = { buildHeatmapData, renderTitle };

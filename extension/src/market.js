@@ -32,7 +32,19 @@ function marketStatus() {
 }
 
 /**
- * 当前所属 A股交易日 YYYY-MM-DD。
+ * 本地时区日期 YYYY-MM-DD。
+ * 不能用 toISOString()——它返回 UTC 日期，与本地时间的盘中判断混用，
+ * 在 UTC+8 凌晨会算成前一天，导致交易日/缓存键错位。
+ */
+function localDateStr(d) {
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
+/**
+ * 当前所属 A股交易日 YYYY-MM-DD（本地时区）。
  * 盘后/周末 → 最近的交易日（周五或更早），节假日不处理。
  */
 function currentTradingDate() {
@@ -42,21 +54,21 @@ function currentTradingDate() {
 
   if (wd === 0) {
     const r = new Date(today); r.setDate(r.getDate() - 2);
-    return r.toISOString().slice(0, 10);
+    return localDateStr(r);
   }
   if (wd === 6) {
     const r = new Date(today); r.setDate(r.getDate() - 1);
-    return r.toISOString().slice(0, 10);
+    return localDateStr(r);
   }
 
   if (d.h < 9 || (d.h === 9 && d.m < 30)) {
     const r = new Date(today);
     r.setDate(r.getDate() - 1);
-    while (r.getDay() >= 5) r.setDate(r.getDate() - 1);
-    return r.toISOString().slice(0, 10);
+    while (r.getDay() >= 5 || r.getDay() === 0) r.setDate(r.getDate() - 1);
+    return localDateStr(r);
   }
 
-  return today.toISOString().slice(0, 10);
+  return localDateStr(today);
 }
 
 /** sh600519 → 600519 */

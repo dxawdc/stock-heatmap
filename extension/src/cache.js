@@ -3,15 +3,20 @@
 const _memCache = {};           // key → { ts, td, data }
 const MARKET_OPEN_TTL = 120;    // 盘中 2min
 
+// 统一出口：title 按当前时间动态渲染（CACHE_VERSION/renderTitle 来自 heatmap.js，先于本文件加载）
+function _finalize(data, cacheType) {
+  return { ...data, title: HeatmapBuilder.renderTitle(data.title_meta), cache_type: cacheType };
+}
+
 function _storageKey(topN, groupBy, sizeBy, td) {
-  return `heatmap_v3_${td}_${topN}_${groupBy}_${sizeBy}`;
+  return `heatmap_${CACHE_VERSION}_${td}_${topN}_${groupBy}_${sizeBy}`;
 }
 
 async function _tryMemCache(key, td) {
   const entry = _memCache[key];
   if (!entry || entry.td !== td) return null;
-  if (!isMarketOpen()) return { ...entry.data, cache_type: "memory" };
-  if ((Date.now() / 1000 - entry.ts) < MARKET_OPEN_TTL) return { ...entry.data, cache_type: "memory" };
+  if (!isMarketOpen()) return _finalize(entry.data, "memory");
+  if ((Date.now() / 1000 - entry.ts) < MARKET_OPEN_TTL) return _finalize(entry.data, "memory");
   return null;
 }
 
@@ -21,7 +26,7 @@ async function _tryStorageCache(key) {
       if (!result[key]) { resolve(null); return; }
       try {
         const data = JSON.parse(result[key]);
-        if (data && data.cache_version === "v3") resolve({ ...data, cache_type: "local" });
+        if (data && data.cache_version === CACHE_VERSION) resolve(_finalize(data, "local"));
         else {
           chrome.storage.local.remove(key);
           resolve(null);
@@ -76,12 +81,11 @@ async function buildHeatmapCached(topN, groupBy, sizeBy, force = false) {
     if (hit2) return hit2;
 
     const data = await HeatmapBuilder.buildHeatmapData(topN, groupBy, sizeBy);
-    data.cache_type = "fresh";
 
     _memCache[key] = { ts: Date.now() / 1000, td, data };
-    _writeStorage(key, data).catch(() => {});
+    _writeStorage(key, data).catch(() => {});   // 存 title_meta，不存运行时 title
 
-    return data;
+    return _finalize(data, "fresh");
   });
 }
 
