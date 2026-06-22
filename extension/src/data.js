@@ -17,6 +17,7 @@ let _swCacheTs = 0;
 const SECTOR_MAP_TTL = 86400;   // 24h
 const CODE_LIST_TTL  = 21600;   // 6h
 const SW_CACHE_TTL   = 300;     // 5min
+const MIN_FULL_MARKET_CODES = 4500;
 
 // ── 进度回调 ─────────────────────────────────────────────────────
 function onSectorProgress(cb) {
@@ -91,19 +92,27 @@ async function fetchMarketIndex() {
 async function fetchSSECodeList(stockType) {
   const params = new URLSearchParams({
     sqlId: "COMMON_SSE_CP_GPJCTPZ_GPLB_GP_L",
+    type: "inParams",
     STOCK_TYPE: String(stockType),
+    REG_PROVINCE: "",
+    CSRC_CODE: "",
+    STOCK_CODE: "",
     COMPANY_STATUS: "2,4,5,7,8",
-    isPagination: "false",
+    isPagination: "true",
     "pageHelp.cacheSize": "1",
-    "pageHelp.beginPage": "0",
-    "pageHelp.pageSize": "10000",
+    "pageHelp.beginPage": "1",
+    "pageHelp.pageSize": "2000",
+    "pageHelp.pageNo": "1",
   });
   const resp = await fetch(`https://query.sse.com.cn/sseQuery/commonQuery.do?${params}`);
+  if (!resp.ok) throw new Error(`上交所代码列表请求失败（HTTP ${resp.status}）`);
   const data = await resp.json();
   const result = data.result || (data.pageHelp && data.pageHelp.result) || [];
-  return result
+  const codes = result
     .map(r => String(r.COMPANY_CODE || r.A_STOCK_CODE || "").padStart(6, "0"))
     .filter(c => /^\d{6}$/.test(c));
+  if (!codes.length) throw new Error(`上交所股票类型 ${stockType} 返回空列表`);
+  return codes;
 }
 
 async function fetchSZSECodeList() {
@@ -128,8 +137,8 @@ async function fetchSZSECodeList() {
 
 async function fetchBSECodeList() {
   const codes = [];
-  let page = 1;
-  while (page <= 20) {
+  let page = 0;
+  while (page < 20) {
     const body = new URLSearchParams({
       page: String(page),
       typejb: "T",
@@ -143,11 +152,15 @@ async function fetchBSECodeList() {
       body: body.toString(),
     });
     const text = await resp.text();
-    const start = text.indexOf("[");
-    const end = text.lastIndexOf("]");
+    const start = text.indexOf("(");
+    const end = text.lastIndexOf(")");
     if (start < 0 || end < 0) break;
-    let arr;
-    try { arr = JSON.parse(text.slice(start, end + 1)); } catch { break; }
+    let payload;
+    try { payload = JSON.parse(text.slice(start + 1, end)); } catch { break; }
+    const wrapper = Array.isArray(payload) ? payload[0] : payload;
+    const arr = Array.isArray(wrapper && wrapper.content)
+      ? wrapper.content
+      : (Array.isArray(payload) ? payload : []);
     if (!arr.length) break;
     for (const row of arr) {
       const c = String(row.xxzqdm || row.zqdm || "").padStart(6, "0");
@@ -170,17 +183,22 @@ async function getCodeList() {
   try { szAll = await fetchSZSECodeList(); } catch (_) {}
   try { bj = await fetchBSECodeList(); } catch (_) {}
 
-  const codes = [
+  const codes = [...new Set([
     ...shMain.map(c => `sh${c}`),
     ...shKcb.map(c => `sh${c}`),
     ...szAll.map(c => `sz${c}`),
     ...bj.map(c => `bj${c}`),
-  ];
+  ])];
 
-  if (codes.length) {
-    _codeList = codes;
-    _codeListTs = now;
+  if (codes.length < MIN_FULL_MARKET_CODES) {
+    throw new Error(
+      `股票代码列表不完整（沪主板 ${shMain.length}、科创板 ${shKcb.length}、` +
+      `深市 ${szAll.length}、北交所 ${bj.length}，合计 ${codes.length}）`
+    );
   }
+
+  _codeList = codes;
+  _codeListTs = now;
 
   return _codeList;
 }

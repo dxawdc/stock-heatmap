@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "A股市场热力树图",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "纯前端 A股实时热力树图：腾讯行情 + 新浪指数 + 申万行业，点图标在新标签页打开。作者@可以叫我才哥",
   "permissions": ["storage", "declarativeNetRequest"],
   "host_permissions": [

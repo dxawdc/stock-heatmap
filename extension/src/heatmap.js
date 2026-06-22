@@ -6,7 +6,7 @@ const SIZE_LABELS = {
   float_cap: ["流通市值", "亿元"],
 };
 
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v5";
 
 /**
  * 根据标题元信息 + 当前时间动态生成标题。
