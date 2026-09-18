@@ -282,7 +282,7 @@ function render() {
     labels, parents, values,
     branchvalues: 'total',
     maxdepth: state.groupBy === 'none' ? 1 : 3,
-    textinfo: 'label+value+percent root',
+    texttemplate: '%{label}<br>%{customdata:.2f}%',
     textfont: { size: 11 },
     hovertemplate:
       '<b>%{label}</b><br>涨跌幅：%{customdata:.2f}%' +
