@@ -43,6 +43,13 @@ TENCENT_HDR = {"Referer": "https://finance.qq.com", "User-Agent": "Mozilla/5.0"}
 
 # 申万官网接口
 SW_HDR = {"User-Agent": "Mozilla/5.0", "Referer": "https://www.swsresearch.com/"}
+
+# 新浪交易日历（上证指数日K线，返回真实交易日日期，天然排除周末与法定节假日）
+SINA_HDR = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
+SINA_KDATA_URL = ("http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+                  "CN_MarketData.getKLineData?symbol=sh000001&scale=240&ma=no&datalen={}")
+TRADE_CAL_DATALEN = 400  # 拉取约最近 400 个交易日，覆盖一年以上
+TRADE_CAL_CACHE_TTL = 86400  # 交易日历缓存 24h
 SW_L1_LIST_URL = ("https://www.swsresearch.com/institute-sw/api/index_publish/current/"
                   "?indextype=%E4%B8%80%E7%BA%A7%E8%A1%8C%E4%B8%9A&page=1&page_size=100")
 SW_COMPONENTS_URL = ("https://www.swsresearch.com/institute-sw/api/index_publish/"
@@ -82,6 +89,8 @@ FILTER_DIMENSIONS = {
 # 默认缓存路径（脚本同级）
 DEFAULT_SECTOR_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                     "sector_map.json")
+DEFAULT_TRADE_CAL_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                       "trade_calendar.json")
 
 
 def _http_get(url, headers, encoding=None, timeout=15):
@@ -111,22 +120,76 @@ def _hm():
     return n, (n.hour, n.minute)
 
 
-def is_market_open():
-    """A股是否正在交易（仅排除周末，未接交易日历）。"""
+def build_trade_calendar(cache_path=DEFAULT_TRADE_CAL_CACHE):
+    """
+    构建交易日集合（set[str]，形如 "YYYY-MM-DD"）。
+
+    数据源：新浪上证指数日K线接口（getKLineData），返回真实交易日日期，
+    天然排除周末与法定节假日（国庆/春节/清明等）。
+
+    磁盘缓存 24h；拉取失败时返回 None（调用方退回「仅排除周末」）。
+    """
+    # 1. 先尝试读缓存
+    try:
+        if os.path.exists(cache_path):
+            data = json.load(open(cache_path, encoding="utf-8"))
+            if time.time() - data.get("ts", 0) < TRADE_CAL_CACHE_TTL:
+                return set(data.get("days", []))
+    except Exception:
+        pass
+
+    # 2. 拉取上证指数日K线
+    try:
+        url = SINA_KDATA_URL.format(TRADE_CAL_DATALEN)
+        arr = _http_get_json(url, headers=SINA_HDR, timeout=20)
+        if not arr:
+            return None
+        days = set()
+        for item in arr:
+            d = item.get("day")
+            if d and len(d) == 10:
+                days.add(d)
+        if len(days) < 100:  # 数据异常，太少不可用
+            return None
+        # 3. 写缓存
+        try:
+            json.dump({"ts": time.time(), "days": sorted(days)},
+                      open(cache_path, "w", encoding="utf-8"),
+                      ensure_ascii=False)
+        except Exception:
+            pass
+        return days
+    except Exception:
+        return None
+
+
+def is_market_open(trade_days=None):
+    """A股是否正在交易（优先用交易日历识别节假日，失败退回仅排除周末）。"""
     n, (h, m) = _hm()
-    if n.weekday() >= 5:
+    d = n.date().isoformat()
+    if trade_days is not None:
+        if d not in trade_days:
+            return False
+    elif n.weekday() >= 5:
         return False
     t = (h, m)
     return (OPEN_AM <= t <= CLOSE_AM) or (OPEN_PM <= t <= CLOSE_PM)
 
 
-def current_trading_date():
-    """当前所属交易日 YYYY-MM-DD（开盘前/非交易日回退）。"""
+def current_trading_date(trade_days=None):
+    """当前所属交易日 YYYY-MM-DD（开盘前/非交易日回退到最近交易日）。"""
     n, (h, m) = _hm()
     d = n.date()
     if (h, m) < (9, 30):
         d -= timedelta(days=1)
-    while d.weekday() >= 5:  # 回退到最近工作日
+    # 回退到最近交易日
+    for _ in range(30):
+        iso = d.isoformat()
+        if trade_days is not None:
+            if iso in trade_days:
+                return iso
+        elif d.weekday() < 5:
+            return iso
         d -= timedelta(days=1)
     return d.isoformat()
 
@@ -463,13 +526,15 @@ def build_frontend_payload(sector_cache=None):
     由 assets/template.html 在浏览器里实时完成筛选/分组/top-N/色块切换。
     这是 --html 模式的默认输出，让筛选器直接内嵌到 HTML 页面。
     """
-    with cf.ThreadPoolExecutor(max_workers=3) as ex:
+    with cf.ThreadPoolExecutor(max_workers=4) as ex:
         f_stocks = ex.submit(fetch_stock_data)
         f_index = ex.submit(fetch_market_index)
         f_sw = ex.submit(build_sector_map, sector_cache or DEFAULT_SECTOR_CACHE)
+        f_cal = ex.submit(build_trade_calendar)
         rows, market_count = f_stocks.result()
         market_chg = f_index.result()
         sector_map, sector_chg = f_sw.result()
+        trade_days = f_cal.result()
 
     # 全量股票明细（前端据此筛选/分组/截断）
     stocks = []
@@ -487,13 +552,13 @@ def build_frontend_payload(sector_cache=None):
             "tags": sorted(r["_tags"]),           # 筛选标签
         })
 
-    td = current_trading_date()
+    td = current_trading_date(trade_days)
     now = datetime.now()
     return {
         "mode": "frontend",
         "trading_date": td,
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "market_status": "open" if is_market_open() else "closed",
+        "market_status": "open" if is_market_open(trade_days) else "closed",
         "market_count": market_count,
         "market_chg": market_chg,                 # 大盘指数涨跌幅（小数）
         "sector_map": sector_map,                 # code_clean → 申万行业
@@ -506,14 +571,16 @@ def build_heatmap_data(top_n, group_by, size_by, include=None, exclude=None,
                        sector_cache=None):
     size_label, size_unit = SIZE_LABELS.get(size_by, ("成交额", "万元"))
 
-    # 3 路并发：行情 + 大盘指数 + 申万映射/涨跌
-    with cf.ThreadPoolExecutor(max_workers=3) as ex:
+    # 4 路并发：行情 + 大盘指数 + 申万映射/涨跌 + 交易日历
+    with cf.ThreadPoolExecutor(max_workers=4) as ex:
         f_stocks = ex.submit(fetch_stock_data)
         f_index = ex.submit(fetch_market_index)
         f_sw = ex.submit(build_sector_map, sector_cache or DEFAULT_SECTOR_CACHE)
+        f_cal = ex.submit(build_trade_calendar)
         rows, market_count = f_stocks.result()
         market_chg_index = f_index.result()
         sector_map, sector_chg = f_sw.result()
+        trade_days = f_cal.result()
 
     # 筛选（含 top_n 之前的原始全量筛选）
     rows, filter_desc = apply_filters(rows, include, exclude)
@@ -576,7 +643,7 @@ def build_heatmap_data(top_n, group_by, size_by, include=None, exclude=None,
     total_vol = sum(c["vol"] for c in children)
     total_mkt = sum(c["mktcap"] for c in children)
 
-    td = current_trading_date()
+    td = current_trading_date(trade_days)
     now = datetime.now()
 
     return {
@@ -593,7 +660,7 @@ def build_heatmap_data(top_n, group_by, size_by, include=None, exclude=None,
         "group_by": group_by,
         "trading_date": td,
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "market_status": "open" if is_market_open() else "closed",
+        "market_status": "open" if is_market_open(trade_days) else "closed",
     }
 
 

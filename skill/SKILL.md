@@ -25,6 +25,7 @@ agent_created: true
 - **真实涨跌色**：板块/全市场涨跌幅取自官方指数（申万行业指数、上证 A股指数 sh000002），非简单等权均值。
 - **Top-N 筛选**：只取成交额/市值最大的前 N 只。
 - **涨红跌绿**：遵循 A股配色惯例（涨红、跌绿）。
+- **交易日历（识别节假日）**：直连新浪上证指数日K线接口构建交易日集合，正确识别周末与法定节假日（国庆/春节/元旦等），磁盘缓存 24h，失败自动退回「仅排除周末」。
 
 ## 使用方式
 
@@ -67,7 +68,7 @@ python scripts/generate_heatmap.py --include KCB --exclude ST   # 科创板且�
 
 脚本不依赖 akshare/plotly（纯标准库 + requests）。申万行业映射与行业涨跌幅直连申万官网（swsresearch.com），磁盘缓存 24h，失败自动退回交易所板块分组；渲染由浏览器端 Plotly CDN 完成。参见 `references/implementation.md` 了解数据 JSON 结构与腾讯/申万字段解析细节。
 
-### 方式二：直接复用原仓库
+### 方式三：直接复用原仓库
 
 如需完整服务（FastAPI 后端 + 多用户 + 磁盘缓存 + 交易日历），参考原仓库 `web/` 目录：`pip install -r requirements.txt && python app.py`，浏览器访问 `http://localhost:8000`。数据源与实现逻辑见 `references/implementation.md`。
 
@@ -76,7 +77,7 @@ python scripts/generate_heatmap.py --include KCB --exclude ST   # 科创板且�
 - 数据源为腾讯财经等公开接口，仅供学习研究，**不构成投资建议**。
 - 腾讯行情接口返回 GBK 编码，字段以 `~` 分隔（字段索引见 `references/implementation.md`）。
 - 上游接口字段/防盗链策略可能变动，若拉取失败请检查数据源是否调整。
-- 非交易日（周末/节假日）拉取到的是最近交易日的收盘数据，脚本会自动标注市场状态。
+- 非交易日（周末/节假日）拉取到的是最近交易日的收盘数据，脚本会自动标注市场状态；交易日历基于新浪上证指数日K线，失败时自动退回「仅排除周末」。
 
 ## 参考文档
 

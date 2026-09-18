@@ -120,9 +120,17 @@
 ## 5. 市场时间与交易日
 
 - 交易时段：上午 `9:25–11:31`，下午 `13:00–15:01`（含集合竞价容差）。
-- 交易日判断：优先交易日历（网页版 akshare、插件版新浪 `klc_td_sh.txt` 解码），失败退回「仅排除周末」。
+- 交易日判断：优先交易日历（网页版 akshare、插件版新浪 `klc_td_sh.txt` 解码、**Skill 版新浪上证指数日K线 `getKLineData`**），失败退回「仅排除周末」。
 - `current_trading_date`：非交易日或开盘前（9:30 之前）回退到最近交易日。
 - 注意：插件版用本地时区日期（`localDateStr`，非 `toISOString()`，避免 UTC 偏移导致缓存键错位）。
+
+### 5.1 Skill 版交易日历实现
+
+- 数据源：新浪 `CN_MarketData.getKLineData`（`symbol=sh000001&scale=240&ma=no&datalen=400`），返回 JSON 数组，每项 `day` 字段即一个**真实交易日日期**，天然排除周末与法定节假日（国庆/春节/元旦/清明等）。
+- 相比插件版的 `klc_td_sh.txt`（需前端 `sina-date-decode` 解码的加密字符串），K线接口**直接返回明文日期**，解析零成本。
+- `build_trade_calendar()`：拉取 → 提取 `day` 集合 → 磁盘缓存 `trade_calendar.json`（24h TTL）。返回 `None`（拉取失败/数据异常）时，`is_market_open` / `current_trading_date` 自动退回「仅排除周末」。
+- `datalen=400` 覆盖约最近 400 个交易日（近 20 个月），足以判断任意查询日期是否为交易日。
+- 与申万映射、大盘指数一起在 `ThreadPoolExecutor(max_workers=4)` 中并发拉取，不增加额外耗时。
 
 ## 6. 缓存策略
 
