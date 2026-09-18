@@ -297,7 +297,35 @@ python scripts/generate_heatmap.py \
 
 ## 安装到 WorkBuddy
 
-将 `skill/` 目录复制到 `~/.workbuddy/skills/a-share-heatmap/`（用户级，跨项目可用），之后在 WorkBuddy 对话中直接说「生成 A股热力图」即可触发。
+### 方式一：一句话安装（推荐）
+
+直接在 WorkBuddy 对话中发送下面这句话，AI 会自动完成「克隆 → 安全审计 → 安装 → 冒烟测试」，全程无需敲命令：
+
+> 帮我安装这个 skill：https://github.com/dxawdc/stock-heatmap
+
+WorkBuddy 会自动识别仓库中的 `skill/`（含 `SKILL.md` 的目录），将其安装到本地技能目录，装好后即可说「生成 A股热力图」触发。
+
+> 说明：本仓库同时包含网页版（`web/`）与插件版（`extension/`），Skill 版在 `skill/` 子目录。发链接安装时会拉取整个仓库，但只把其中的 Skill 注册为可调用技能，其余目录不影响使用。
+
+### 方式二：Git 仓库直拉
+
+打开 WorkBuddy → 右上角头像 →「设置 → 技能管理」→「从 Git 仓库导入」，粘贴本仓库 HTTPS 克隆地址 `https://github.com/dxawdc/stock-heatmap.git`，选择 `skill/` 目录，系统自动拉取并注册。
+
+### 方式三：手动安装
+
+将 `skill/` 目录复制到本地技能目录（用户级，跨项目可用）：
+
+```bash
+# macOS / Linux
+git clone --depth 1 https://github.com/dxawdc/stock-heatmap.git /tmp/sh \
+  && cp -r /tmp/sh/skill ~/.workbuddy/skills/a-share-heatmap
+
+# Windows (PowerShell)
+git clone --depth 1 https://github.com/dxawdc/stock-heatmap.git "$env:TEMP\sh"
+Copy-Item -Recurse "$env:TEMP\sh\skill" "$env:USERPROFILE\.workbuddy\skills\a-share-heatmap"
+```
+
+装好后，在 WorkBuddy 对话中直接说「生成 A股热力图」即可触发。
 
 ## 与网页版/插件版的差异
 
