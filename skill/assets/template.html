@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A股热力树图</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --border: #d0d3d8; --text: #1f2329;
+    --muted: #8a919c; --accent: #2f6fed;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); padding: 14px 16px;
+  }
+  h1#title {
+    font-size: 15px; font-weight: 600; text-align: center; margin-bottom: 10px;
+    line-height: 1.5;
+  }
+  .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .controls {
+    display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-start;
+  }
+  .ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+  .ctrl-group > span {
+    font-size: 12px; color: var(--muted); font-weight: 600;
+  }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 20px;
+    background: #fff; font-size: 12px; cursor: pointer; user-select: none;
+    transition: all .15s; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip.inc.on { background: #2f6fed; }
+  .chip.exc.on { background: #e5484d; border-color: #e5484d; }
+  select, button {
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px;
+    background: #fff; font-size: 13px; cursor: pointer; color: var(--text);
+  }
+  select:focus, button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #chart { width: 100%; height: calc(100vh - 260px); background: var(--card);
+           border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  #status { font-size: 12px; color: var(--muted); text-align: center; margin-top: 6px; }
+</style>
+</head>
+<body>
+<h1 id="title"></h1>
+
+<div class="panel">
+  <div class="controls">
+    <div class="ctrl-group">
+      <span>分组方式</span>
+      <select id="groupBy">
+        <option value="sw">申万一级行业</option>
+        <option value="board">交易所板块</option>
+        <option value="none">平铺（不分组）</option>
+      </select>
+    </div>
+
+    <div class="ctrl-group">
+      <span>色块大小</span>
+      <select id="sizeBy">
+        <option value="mktcap">总市值</option>
+        <option value="float_cap">流通市值</option>
+        <option value="vol">成交额</option>
+      </select>
+    </div>
+
+    <div class="ctrl-group">
+      <span>Top-N（0=全部）</span>
+      <select id="topN">
+        <option value="0">全部</option>
+        <option value="50">前 50</option>
+        <option value="100">前 100</option>
+        <option value="300">前 300</option>
+        <option value="500" selected>前 500</option>
+        <option value="1000">前 1000</option>
+      </select>
+    </div>
+
+    <div class="ctrl-group" style="flex:1; min-width:280px;">
+      <span>包含（并集，不选=不限）</span>
+      <div class="chips" id="includeChips"></div>
+    </div>
+
+    <div class="ctrl-group" style="flex:1; min-width:280px;">
+      <span>排除（优先于包含）</span>
+      <div class="chips" id="excludeChips"></div>
+    </div>
+
+    <div class="ctrl-group">
+      <span>操作</span>
+      <div style="display:flex; gap:6px;">
+        <button id="reset">重置</button>
+        <button id="fullscreen">全屏</button>
+        <button id="exportPng" class="primary">导出 PNG</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="chart"></div>
+<div id="status"></div>
+
+<script>
+// 前端数据包占位符：由脚本替换
+const DATA = __HEATMAP_DATA__;
+
+// ── 维度定义 ──────────────────────────────────────────────────
+const DIMS = {
+  ST:  "ST股",
+  KCB: "科创板",
+  CYB: "创业板",
+  BSE: "北交所",
+  SH:  "沪主板",
+  SZ:  "深主板",
+};
+const SIZE_META = {
+  vol:       ["成交额", "万元"],
+  mktcap:    ["总市值", "亿元"],
+  float_cap: ["流通市值", "亿元"],
+};
+
+// ── 状态 ──────────────────────────────────────────────────────
+const state = {
+  groupBy: 'sw',
+  sizeBy: 'mktcap',
+  topN: 500,
+  include: new Set(),
+  exclude: new Set(),
+};
+
+// ── 工具 ──────────────────────────────────────────────────────
+function chgToNorm(g) {
+  const max = 0.10;
+  const clamped = Math.max(-max, Math.min(max, g));
+  return 0.5 + (clamped / max) * 0.5;
+}
+const COLORSCALE = [
+  [0.0, '#16a34a'], [0.4, '#4ade80'], [0.5, '#f3f4f6'],
+  [0.6, '#fca5a5'], [1.0, '#dc2626'],
+];
+
+// ── 筛选 ──────────────────────────────────────────────────────
+function filteredStocks() {
+  let list = DATA.stocks;
+  if (state.exclude.size) {
+    list = list.filter(s => !(s.tags.some(t => state.exclude.has(t))));
+  }
+  if (state.include.size) {
+    list = list.filter(s => s.tags.some(t => state.include.has(t)));
+  }
+  return list;
+}
+
+// ── 分组 ──────────────────────────────────────────────────────
+function groupKey(s) {
+  if (state.groupBy === 'sw') return s.sector;
+  if (state.groupBy === 'board') return s.board;
+  return null; // 平铺
+}
+
+function buildTree(stocks) {
+  const sizeBy = state.sizeBy;
+  // 各股票 size 值
+  const nodes = stocks.map(s => ({
+    n: s.n, c: s.c, g: s.chg,
+    vol: s.vol, mktcap: s.mktcap, float_cap: s.float_cap,
+    v: s[sizeBy],
+  }));
+
+  // 大盘指数（根节点）
+  let rootChg = DATA.market_chg;
+  let rootChgSrc = 'A股指数(sh000002)';
+  if (rootChg == null) {
+    rootChg = nodes.reduce((a, b) => a + b.g, 0) / (nodes.length || 1);
+    rootChgSrc = '等权均值';
+  }
+
+  let children;
+  let groupDesc;
+  if (state.groupBy === 'none') {
+    children = nodes;
+    groupDesc = '平铺（不分组）';
+  } else {
+    // 分组
+    const groups = {};
+    for (const s of stocks) {
+      const k = groupKey(s);
+      (groups[k] || (groups[k] = [])).push(s);
+    }
+    const sectorChg = (state.groupBy === 'sw') ? DATA.sector_chg : {};
+    children = [];
+    for (const [name, gs] of Object.entries(groups)) {
+      const gnodes = gs.map(s => ({
+        n: s.n, c: s.c, g: s.chg,
+        vol: s.vol, mktcap: s.mktcap, float_cap: s.float_cap,
+        v: s[sizeBy],
+      }));
+      const sv = gnodes.reduce((a, b) => a + b.v, 0);
+      let sg, sgSrc;
+      if (sectorChg[name] != null) {
+        sg = sectorChg[name]; sgSrc = '申万指数';
+      } else {
+        sg = gnodes.reduce((a, b) => a + b.g * b.v, 0) / (sv || 1);
+        sgSrc = '加权均值';
+      }
+      children.push({
+        n: name, v: sv, g: sg, src: sgSrc, cnt: gnodes.length,
+        vol: gnodes.reduce((a, b) => a + b.vol, 0),
+        mktcap: gnodes.reduce((a, b) => a + b.mktcap, 0),
+        children: gnodes,
+      });
+    }
+    children.sort((a, b) => b.vol - a.vol);
+    groupDesc = (state.groupBy === 'sw') ? '申万一级行业' : '交易所板块';
+  }
+
+  const totalV = children.reduce((a, b) => a + b.v, 0);
+  const totalVol = children.reduce((a, b) => a + b.vol, 0);
+  const totalMkt = children.reduce((a, b) => a + b.mktcap, 0);
+
+  return {
+    groupDesc,
+    root: {
+      n: 'A股', v: totalV, g: rootChg, src: rootChgSrc, cnt: stocks.length,
+      vol: totalVol, mktcap: totalMkt, children,
+    },
+  };
+}
+
+// ── 渲染 ──────────────────────────────────────────────────────
+function render() {
+  let stocks = filteredStocks();
+
+  // top-N 截断（按当前 sizeBy 排序）
+  if (state.topN > 0) {
+    const sizeBy = state.sizeBy;
+    stocks = [...stocks].sort((a, b) => b[sizeBy] - a[sizeBy]).slice(0, state.topN);
+  }
+
+  const { groupDesc, root } = buildTree(stocks);
+  const [sizeLabel, sizeUnit] = SIZE_META[state.sizeBy];
+
+  // 标题
+  const statusText = DATA.market_status === 'open' ? '盘中' : '闭市';
+  const filterParts = [];
+  if (state.include.size) filterParts.push('包含[' + [...state.include].map(k => DIMS[k]).join('+') + ']');
+  if (state.exclude.size) filterParts.push('排除[' + [...state.exclude].map(k => DIMS[k]).join('+') + ']');
+  const filterText = filterParts.length ? ' | 筛选：' + filterParts.join(' & ') : '';
+  const scope = state.topN === 0
+    ? `全部 ${stocks.length} 只`
+    : `${sizeLabel}前 ${state.topN} 只（显示 ${stocks.length} 只）`;
+  document.getElementById('title').textContent =
+    `A股热力树图 · ${DATA.trading_date} ${DATA.generated_at} ${statusText}` +
+    ` | 分组：${groupDesc} | 色块大小：${sizeLabel}(${sizeUnit})` +
+    ` | 范围：${scope}${filterText} | 颜色：涨跌幅（红涨跌绿）`;
+
+  // 组装 Plotly treemap 数据
+  const labels = [], parents = [], values = [], colors = [], gvals = [];
+  function walk(node, parent, level) {
+    const label = node.c ? `${node.n} (${node.c})` : node.n;
+    labels.push(label);
+    parents.push(parent);
+    values.push(node.v || 0);
+    colors.push(chgToNorm(node.g));
+    gvals.push(node.g * 100);
+    if (node.children) for (const c of node.children) walk(c, node.n, level + 1);
+  }
+  walk(root, '', 0);
+
+  const trace = {
+    type: 'treemap',
+    labels, parents, values,
+    branchvalues: 'total',
+    maxdepth: state.groupBy === 'none' ? 1 : 3,
+    textinfo: 'label+value+percent root',
+    textfont: { size: 11 },
+    hovertemplate:
+      '<b>%{label}</b><br>涨跌幅：%{customdata:.2f}%' +
+      '<br>' + sizeLabel + '：%{value:.0f} ' + sizeUnit +
+      '<extra></extra>',
+    customdata: gvals,
+    marker: {
+      colors, colorscale: COLORSCALE, cmin: 0, cmax: 1, showscale: true,
+      colorbar: {
+        title: { text: '涨跌幅', side: 'right' },
+        tickvals: [0, 0.25, 0.5, 0.75, 1],
+        ticktext: ['-10%', '-5%', '0%', '+5%', '+10%'],
+      },
+      line: { width: 1, color: '#fff' },
+    },
+  };
+
+  Plotly.newPlot('chart', [trace], {
+    margin: { l: 0, r: 0, t: 0, b: 0 }, paper_bgcolor: '#fff',
+  }, { responsive: true, displaylogo: false });
+
+  // 状态栏
+  document.getElementById('status').textContent =
+    `全市场 ${DATA.market_count} 只 · 当前显示 ${stocks.length} 只 · 数据时间 ${DATA.generated_at}`;
+}
+
+// ── 构建筛选 chips ────────────────────────────────────────────
+function buildChips(containerId, targetSet, cls) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  for (const [key, label] of Object.entries(DIMS)) {
+    const chip = document.createElement('div');
+    chip.className = 'chip ' + cls;
+    chip.textContent = label;
+    chip.dataset.key = key;
+    chip.addEventListener('click', () => {
+      if (targetSet.has(key)) targetSet.delete(key);
+      else targetSet.add(key);
+      chip.classList.toggle('on');
+      render();
+    });
+    container.appendChild(chip);
+  }
+}
+buildChips('includeChips', state.include, 'inc');
+buildChips('excludeChips', state.exclude, 'exc');
+
+// ── 控件绑定 ──────────────────────────────────────────────────
+document.getElementById('groupBy').addEventListener('change', e => {
+  state.groupBy = e.target.value; render();
+});
+document.getElementById('sizeBy').addEventListener('change', e => {
+  state.sizeBy = e.target.value; render();
+});
+document.getElementById('topN').addEventListener('change', e => {
+  state.topN = parseInt(e.target.value, 10); render();
+});
+document.getElementById('reset').addEventListener('click', () => {
+  state.include.clear(); state.exclude.clear();
+  state.groupBy = 'sw'; state.sizeBy = 'mktcap'; state.topN = 500;
+  document.getElementById('groupBy').value = 'sw';
+  document.getElementById('sizeBy').value = 'mktcap';
+  document.getElementById('topN').value = '500';
+  document.querySelectorAll('.chip.on').forEach(c => c.classList.remove('on'));
+  render();
+});
+document.getElementById('fullscreen').addEventListener('click', () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+});
+document.getElementById('exportPng').addEventListener('click', () => {
+  Plotly.downloadImage('chart', { format: 'png', filename: 'A股热力图', width: 1600, height: 900 });
+});
+
+// 初始渲染
+render();
+</script>
+</body>
+</html>
